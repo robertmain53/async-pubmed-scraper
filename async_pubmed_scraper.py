@@ -1,4 +1,6 @@
 """
+
+se da errore "too many files opened" far girare sul terminale: sudo ulimit -n 8096
 Author: Ilia Zenkov
 Date: 9/26/2020
 
@@ -146,7 +148,8 @@ async def extract_by_article(url):
                 'affiliations': affiliations,
                 'journal': journal,
                 'keywords': keywords,
-                'date': date
+                'date': date,
+                'source_keyword': keyword  # Add the keyword to the dictionary
             }
             # Add dict containing one article's data to list of article dicts
             articles_data.append(article_data)
@@ -173,7 +176,7 @@ async def get_pmids(page, keyword):
             # Extract URLs by getting PMIDs for all pubmed articles on the results page (default 10 articles/page)
             for pmid in pmids.split(','):
                 url = root_pubmed_url + '/' + pmid
-                urls.append(url)
+                urls.append((url, keyword))  # Store URLs with their corresponding keyword
 
 def get_num_pages(keyword):
     '''
@@ -220,10 +223,11 @@ async def get_article_data(urls):
     :param urls: List[string]: list of all pubmed urls returned by the search keyword
     :return: None
     """
+    batch_size = 3  # Numero di URL da processare per volta
     tasks = []
-    for url in urls:
+    for url, keyword in urls:  # Unpack the tuple
         if url not in scraped_urls:
-            task = asyncio.create_task(extract_by_article(url))
+            task = asyncio.create_task(extract_by_article(url, keyword))  # Pass the keyword
             tasks.append(task)
             scraped_urls.append(url)
 
@@ -261,7 +265,7 @@ if __name__ == "__main__":
     # We use asyncio's BoundedSemaphore method to limit the number of asynchronous requests
     #    we make to PubMed at a time to avoid a ban (and to be nice to PubMed servers)
     # Higher value for BoundedSemaphore yields faster scraping, and a higher chance of ban. 100-500 seems to be OK.
-    semaphore = asyncio.BoundedSemaphore(100)
+    semaphore = asyncio.BoundedSemaphore(5)
 
     # Get and run the loop to build a list of all URLs
     loop = asyncio.get_event_loop()
@@ -272,11 +276,10 @@ if __name__ == "__main__":
     loop.run_until_complete(get_article_data(urls))
 
     # Create DataFrame to store data from all articles
-    articles_df = pd.DataFrame(articles_data, columns=['title','abstract','affiliations','authors','journal','date','keywords','url'])
+    articles_df = pd.DataFrame(articles_data, columns=['title', 'abstract', 'affiliations', 'authors', 'journal', 'date', 'keywords', 'url', 'source_keyword'])
     print('Preview of scraped article data:\n')
     print(articles_df.head(5))
     # Save all extracted article data to CSV for further processing
     filename = args.output
     articles_df.to_csv(filename)
     print(f'It took {time.time() - start} seconds to find {len(urls)} articles; {len(scraped_urls)} unique articles were saved to {filename}')
-
